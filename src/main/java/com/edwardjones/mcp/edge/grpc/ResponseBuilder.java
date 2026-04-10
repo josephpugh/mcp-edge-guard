@@ -1,5 +1,11 @@
 package com.edwardjones.mcp.edge.grpc;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.NullNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.fasterxml.jackson.databind.node.TextNode;
 import com.google.protobuf.ByteString;
 import io.envoyproxy.envoy.config.core.v3.HeaderValue;
 import io.envoyproxy.envoy.config.core.v3.HeaderValueOption;
@@ -10,6 +16,8 @@ import io.envoyproxy.envoy.type.v3.StatusCode;
 import java.util.Map;
 
 public final class ResponseBuilder {
+
+    private static final ObjectMapper MAPPER = new ObjectMapper();
 
     public static ProcessingResponse continueHeaders(Map<String, String> additionalHeaders) {
         HeaderMutation.Builder mutation = HeaderMutation.newBuilder();
@@ -35,7 +43,10 @@ public final class ResponseBuilder {
         return ProcessingResponse.newBuilder()
                 .setRequestBody(BodyResponse.newBuilder()
                         .setResponse(CommonResponse.newBuilder()
-                                .setStatus(CommonResponse.ResponseStatus.CONTINUE)
+                                .setStatus(CommonResponse.ResponseStatus.CONTINUE_AND_REPLACE)
+                                .setBodyMutation(BodyMutation.newBuilder()
+                                        .setBody(ByteString.copyFrom(newBody))
+                                        .build())
                                 .build())
                         .build())
                 .build();
@@ -72,9 +83,7 @@ public final class ResponseBuilder {
     }
 
     public static ProcessingResponse immediateJsonRpcError(String requestId, int code, String message, String securityCode) {
-        String jsonBody = String.format(
-                "{\"jsonrpc\":\"2.0\",\"id\":%s,\"error\":{\"code\":%d,\"message\":\"%s\",\"data\":{\"security_code\":\"%s\"}}}",
-                requestId, code, message, securityCode != null ? securityCode : "unknown");
+        String jsonBody = jsonRpcErrorBody(requestId, code, message, securityCode);
 
         return ProcessingResponse.newBuilder()
                 .setImmediateResponse(ImmediateResponse.newBuilder()
@@ -95,9 +104,7 @@ public final class ResponseBuilder {
     }
 
     public static ProcessingResponse replaceResponseWithJsonRpcError(String requestId, int code, String message, String securityCode) {
-        String jsonBody = String.format(
-                "{\"jsonrpc\":\"2.0\",\"id\":%s,\"error\":{\"code\":%d,\"message\":\"%s\",\"data\":{\"security_code\":\"%s\"}}}",
-                requestId, code, message, securityCode != null ? securityCode : "unknown");
+        String jsonBody = jsonRpcErrorBody(requestId, code, message, securityCode);
 
         return ProcessingResponse.newBuilder()
                 .setResponseBody(BodyResponse.newBuilder()
@@ -152,6 +159,36 @@ public final class ResponseBuilder {
             case 503 -> StatusCode.ServiceUnavailable;
             default -> StatusCode.InternalServerError;
         };
+    }
+
+    private static String jsonRpcErrorBody(String requestIdJson, int code, String message, String securityCode) {
+        ObjectNode root = MAPPER.createObjectNode();
+        root.put("jsonrpc", "2.0");
+        root.set("id", parseRequestId(requestIdJson));
+
+        ObjectNode error = root.putObject("error");
+        error.put("code", code);
+        error.put("message", message);
+        error.putObject("data")
+                .put("security_code", securityCode != null ? securityCode : "unknown");
+
+        try {
+            return MAPPER.writeValueAsString(root);
+        } catch (JsonProcessingException e) {
+            throw new IllegalStateException("Failed to build JSON-RPC error body", e);
+        }
+    }
+
+    private static JsonNode parseRequestId(String requestIdJson) {
+        if (requestIdJson == null || requestIdJson.isBlank() || requestIdJson.equals("null")) {
+            return NullNode.getInstance();
+        }
+
+        try {
+            return MAPPER.readTree(requestIdJson);
+        } catch (JsonProcessingException e) {
+            return TextNode.valueOf(requestIdJson);
+        }
     }
 
     private ResponseBuilder() {

@@ -8,6 +8,7 @@ import io.envoyproxy.envoy.service.ext_proc.v3.*;
 import io.grpc.stub.StreamObserver;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.context.annotation.Profile;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -24,6 +25,7 @@ import static net.logstash.logback.argument.StructuredArguments.kv;
  */
 @RestController
 @RequestMapping("/test")
+@Profile("local")
 public class ExtProcTestController {
 
     private static final Logger log = LoggerFactory.getLogger(ExtProcTestController.class);
@@ -177,13 +179,13 @@ public class ExtProcTestController {
                 }
             } else if (resp.hasRequestBody()) {
                 phase.put("phase", "request_body");
-                phase.put("action", resp.getRequestBody().getResponse().getStatus().name().toLowerCase());
+                phase.put("action", resp.getRequestBody().getResponse().getStatus().name().toLowerCase(Locale.ROOT));
             } else if (resp.hasResponseHeaders()) {
                 phase.put("phase", "response_headers");
                 phase.put("action", "continue");
             } else if (resp.hasResponseBody()) {
                 phase.put("phase", "response_body");
-                String status = resp.getResponseBody().getResponse().getStatus().name().toLowerCase();
+                String status = resp.getResponseBody().getResponse().getStatus().name().toLowerCase(Locale.ROOT);
                 phase.put("action", status);
                 if (resp.getResponseBody().getResponse().hasBodyMutation()
                         && resp.getResponseBody().getResponse().getBodyMutation().hasBody()) {

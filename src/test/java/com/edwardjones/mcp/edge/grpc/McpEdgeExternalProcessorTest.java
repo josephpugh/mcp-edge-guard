@@ -233,6 +233,7 @@ class McpEdgeExternalProcessorTest {
         assertTrue(blocked.hasImmediateResponse());
         assertEquals(io.envoyproxy.envoy.type.v3.StatusCode.Forbidden,
                 blocked.getImmediateResponse().getStatus().getCode());
+        assertTrue(blocked.getImmediateResponse().getBody().toStringUtf8().contains("\"id\":\"42\""));
         assertTrue(blocked.getImmediateResponse().getBody().toStringUtf8().contains("Blocked by security policy"));
         assertTrue(blocked.getImmediateResponse().getBody().toStringUtf8().contains("PII_DETECTED"));
     }
@@ -285,6 +286,7 @@ class McpEdgeExternalProcessorTest {
         ByteString replacedBody = respBodyResp.getResponseBody().getResponse()
                 .getBodyMutation().getBody();
         String replacedJson = replacedBody.toStringUtf8();
+        assertTrue(replacedJson.contains("\"id\":\"5\""));
         assertTrue(replacedJson.contains("Response blocked by security policy"));
         assertTrue(replacedJson.contains("MALICIOUS_CONTENT"));
     }
@@ -543,5 +545,178 @@ class McpEdgeExternalProcessorTest {
                 io.opentelemetry.api.common.AttributeKey.stringKey("security.code")));
         assertEquals(io.opentelemetry.api.trace.StatusCode.ERROR,
                 guardSpan.getStatus().getStatusCode());
+    }
+
+    @Test
+    void requestInspectionFailureReturnsHttpError() throws Exception {
+        mockPangea = (recipe, text, toolName) -> {
+            throw new IllegalStateException("pangea unavailable");
+        };
+
+        String serverName = InProcessServerBuilder.generateName();
+        grpcCleanup.register(InProcessServerBuilder.forName(serverName)
+                .directExecutor()
+                .addService(new McpEdgeExternalProcessor(mockPangea, tracer))
+                .build()
+                .start());
+        channel = grpcCleanup.register(
+                InProcessChannelBuilder.forName(serverName).directExecutor().build());
+        stub = ExternalProcessorGrpc.newStub(channel);
+
+        CollectingObserver observer = new CollectingObserver();
+        StreamObserver<ProcessingRequest> requestStream = stub.process(observer);
+
+        String body = """
+                {"jsonrpc":"2.0","id":"1","method":"tools/call","params":{"name":"search_docs"}}
+                """;
+
+        requestStream.onNext(requestHeaders(null, null));
+        requestStream.onNext(requestBody(body));
+        requestStream.onCompleted();
+
+        observer.awaitCompletion();
+        assertNull(observer.error);
+        assertEquals(2, observer.responses.size());
+
+        ProcessingResponse failure = observer.responses.get(1);
+        assertTrue(failure.hasImmediateResponse());
+        assertEquals(io.envoyproxy.envoy.type.v3.StatusCode.InternalServerError,
+                failure.getImmediateResponse().getStatus().getCode());
+        assertEquals("security inspection failure",
+                failure.getImmediateResponse().getBody().toStringUtf8());
+
+        SpanData guardSpan = otelExtension.getSpans().stream()
+                .filter(s -> s.getName().equals("mcp.edge.guard"))
+                .findFirst()
+                .orElseThrow();
+
+        assertEquals(io.opentelemetry.api.trace.StatusCode.ERROR,
+                guardSpan.getStatus().getStatusCode());
+    }
+
+    @Test
+    void responseInspectionFailureReturnsHttpError() throws Exception {
+        mockPangea = (recipe, text, toolName) -> {
+            if (recipe.equals("pangea_agent_post_tool_guard")) {
+                throw new IllegalStateException("pangea unavailable");
+            }
+            return new GuardDecision(recipe, false, null);
+        };
+
+        String serverName = InProcessServerBuilder.generateName();
+        grpcCleanup.register(InProcessServerBuilder.forName(serverName)
+                .directExecutor()
+                .addService(new McpEdgeExternalProcessor(mockPangea, tracer))
+                .build()
+                .start());
+        channel = grpcCleanup.register(
+                InProcessChannelBuilder.forName(serverName).directExecutor().build());
+        stub = ExternalProcessorGrpc.newStub(channel);
+
+        CollectingObserver observer = new CollectingObserver();
+        StreamObserver<ProcessingRequest> requestStream = stub.process(observer);
+
+        String body = """
+                {"jsonrpc":"2.0","id":"1","method":"tools/call","params":{"name":"search_docs"}}
+                """;
+        String responseJson = """
+                {"jsonrpc":"2.0","id":"1","result":{"content":[{"type":"text","text":"result"}]}}
+                """;
+
+        requestStream.onNext(requestHeaders(null, null));
+        requestStream.onNext(requestBody(body));
+        requestStream.onNext(responseHeaders());
+        requestStream.onNext(responseBody(responseJson));
+        requestStream.onCompleted();
+
+        observer.awaitCompletion();
+        assertNull(observer.error);
+        assertEquals(4, observer.responses.size());
+
+        ProcessingResponse failure = observer.responses.get(3);
+        assertTrue(failure.hasImmediateResponse());
+        assertEquals(io.envoyproxy.envoy.type.v3.StatusCode.InternalServerError,
+                failure.getImmediateResponse().getStatus().getCode());
+        assertEquals("security inspection failure",
+                failure.getImmediateResponse().getBody().toStringUtf8());
+
+        SpanData guardSpan = otelExtension.getSpans().stream()
+                .filter(s -> s.getName().equals("mcp.edge.guard"))
+                .findFirst()
+                .orElseThrow();
+
+        assertEquals(io.opentelemetry.api.trace.StatusCode.ERROR,
+                guardSpan.getStatus().getStatusCode());
+    }
+
+    @Test
+    void responseBlockedSetsSecurityAttributes() throws Exception {
+        mockPangea = (recipe, text, toolName) -> {
+            if (recipe.equals("pangea_agent_post_tool_guard")) {
+                return new GuardDecision(recipe, true, "MALICIOUS_CONTENT");
+            }
+            return new GuardDecision(recipe, false, null);
+        };
+
+        String serverName = InProcessServerBuilder.generateName();
+        grpcCleanup.register(InProcessServerBuilder.forName(serverName)
+                .directExecutor()
+                .addService(new McpEdgeExternalProcessor(mockPangea, tracer))
+                .build()
+                .start());
+        channel = grpcCleanup.register(
+                InProcessChannelBuilder.forName(serverName).directExecutor().build());
+        stub = ExternalProcessorGrpc.newStub(channel);
+
+        CollectingObserver observer = new CollectingObserver();
+        StreamObserver<ProcessingRequest> requestStream = stub.process(observer);
+
+        String body = """
+                {"jsonrpc":"2.0","id":"1","method":"tools/call","params":{"name":"evil_tool"}}
+                """;
+        String responseJson = """
+                {"jsonrpc":"2.0","id":"1","result":{"content":[{"type":"text","text":"bad"}]}}
+                """;
+
+        requestStream.onNext(requestHeaders(null, null));
+        requestStream.onNext(requestBody(body));
+        requestStream.onNext(responseHeaders());
+        requestStream.onNext(responseBody(responseJson));
+        requestStream.onCompleted();
+
+        observer.awaitCompletion();
+
+        List<SpanData> spans = otelExtension.getSpans();
+        SpanData guardSpan = spans.stream()
+                .filter(s -> s.getName().equals("mcp.edge.guard"))
+                .findFirst()
+                .orElseThrow();
+
+        assertEquals(true, guardSpan.getAttributes().get(
+                io.opentelemetry.api.common.AttributeKey.booleanKey("security.blocked")));
+        assertEquals("response", guardSpan.getAttributes().get(
+                io.opentelemetry.api.common.AttributeKey.stringKey("security.phase")));
+        assertEquals("MALICIOUS_CONTENT", guardSpan.getAttributes().get(
+                io.opentelemetry.api.common.AttributeKey.stringKey("security.code")));
+        assertEquals(io.opentelemetry.api.trace.StatusCode.ERROR,
+                guardSpan.getStatus().getStatusCode());
+    }
+
+    @Test
+    void unhandledRequestCaseContinues() throws Exception {
+        CollectingObserver observer = new CollectingObserver();
+        StreamObserver<ProcessingRequest> requestStream = stub.process(observer);
+
+        requestStream.onNext(ProcessingRequest.getDefaultInstance());
+        requestStream.onCompleted();
+
+        observer.awaitCompletion();
+        assertNull(observer.error);
+        assertEquals(1, observer.responses.size());
+
+        ProcessingResponse response = observer.responses.get(0);
+        assertTrue(response.hasResponseHeaders());
+        assertEquals(CommonResponse.ResponseStatus.CONTINUE,
+                response.getResponseHeaders().getResponse().getStatus());
     }
 }

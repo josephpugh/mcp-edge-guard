@@ -7,6 +7,7 @@ class SessionState {
     Context guardContext;
     Span guardSpan;
     String requestId;
+    String requestIdJson;
     String mcpMethod;
     String toolName;
 }

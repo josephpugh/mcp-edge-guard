@@ -153,6 +153,7 @@ public class McpEdgeExternalProcessor extends ExternalProcessorGrpc.ExternalProc
             }
 
             session.requestId = envelope.id();
+            session.requestIdJson = envelope.idJson();
             session.mcpMethod = envelope.method();
             session.toolName = envelope.toolName();
 
@@ -192,7 +193,7 @@ public class McpEdgeExternalProcessor extends ExternalProcessorGrpc.ExternalProc
                         kv("securityCode", decision.code()));
 
                 out.onNext(ResponseBuilder.immediateJsonRpcError(
-                        session.requestId, -32001, "Blocked by security policy", decision.code()));
+                        session.requestIdJson, -32001, "Blocked by security policy", decision.code()));
                 return;
             }
 
@@ -248,7 +249,7 @@ public class McpEdgeExternalProcessor extends ExternalProcessorGrpc.ExternalProc
                         kv("securityCode", decision.code()));
 
                 out.onNext(ResponseBuilder.replaceResponseWithJsonRpcError(
-                        session.requestId, -32002, "Response blocked by security policy", decision.code()));
+                        session.requestIdJson, -32002, "Response blocked by security policy", decision.code()));
                 return;
             }
 

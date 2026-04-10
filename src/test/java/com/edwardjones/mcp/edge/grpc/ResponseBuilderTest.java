@@ -1,5 +1,7 @@
 package com.edwardjones.mcp.edge.grpc;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import io.envoyproxy.envoy.service.ext_proc.v3.*;
 import io.envoyproxy.envoy.type.v3.StatusCode;
 import org.junit.jupiter.api.Test;
@@ -9,6 +11,8 @@ import java.util.Map;
 import static org.junit.jupiter.api.Assertions.*;
 
 class ResponseBuilderTest {
+
+    private static final ObjectMapper MAPPER = new ObjectMapper();
 
     @Test
     void continueHeadersWithMutations() {
@@ -46,6 +50,17 @@ class ResponseBuilderTest {
         assertTrue(resp.hasRequestBody());
         assertEquals(CommonResponse.ResponseStatus.CONTINUE,
                 resp.getRequestBody().getResponse().getStatus());
+    }
+
+    @Test
+    void continueAndReplaceBody() {
+        ProcessingResponse resp = ResponseBuilder.continueAndReplaceBody("replacement".getBytes());
+
+        assertTrue(resp.hasRequestBody());
+        assertEquals(CommonResponse.ResponseStatus.CONTINUE_AND_REPLACE,
+                resp.getRequestBody().getResponse().getStatus());
+        assertEquals("replacement", resp.getRequestBody().getResponse()
+                .getBodyMutation().getBody().toStringUtf8());
     }
 
     @Test
@@ -87,6 +102,18 @@ class ResponseBuilderTest {
     }
 
     @Test
+    void immediateJsonRpcErrorPreservesStringIdAndEscapesFields() throws Exception {
+        ProcessingResponse resp = ResponseBuilder.immediateJsonRpcError(
+                "\"abc-123\"", -32001, "Blocked \"quoted\" value", "CODE\"X");
+
+        JsonNode body = MAPPER.readTree(resp.getImmediateResponse().getBody().toStringUtf8());
+
+        assertEquals("abc-123", body.path("id").asText());
+        assertEquals("Blocked \"quoted\" value", body.path("error").path("message").asText());
+        assertEquals("CODE\"X", body.path("error").path("data").path("security_code").asText());
+    }
+
+    @Test
     void immediateJsonRpcErrorWithNullCode() {
         ProcessingResponse resp = ResponseBuilder.immediateJsonRpcError(
                 "1", -32001, "Blocked", null);
@@ -112,6 +139,17 @@ class ResponseBuilderTest {
     }
 
     @Test
+    void replaceResponseWithJsonRpcErrorUsesNullId() throws Exception {
+        ProcessingResponse resp = ResponseBuilder.replaceResponseWithJsonRpcError(
+                "null", -32002, "Response blocked", "MALWARE");
+
+        String body = resp.getResponseBody().getResponse()
+                .getBodyMutation().getBody().toStringUtf8();
+
+        assertTrue(MAPPER.readTree(body).path("id").isNull());
+    }
+
+    @Test
     void immediateHttpError() {
         ProcessingResponse resp = ResponseBuilder.immediateHttpError(500, "internal error");
 
@@ -131,8 +169,16 @@ class ResponseBuilderTest {
     void immediateHttpErrorMapsStatusCodes() {
         assertEquals(StatusCode.BadRequest,
                 ResponseBuilder.immediateHttpError(400, "bad").getImmediateResponse().getStatus().getCode());
+        assertEquals(StatusCode.Unauthorized,
+                ResponseBuilder.immediateHttpError(401, "auth").getImmediateResponse().getStatus().getCode());
         assertEquals(StatusCode.Forbidden,
                 ResponseBuilder.immediateHttpError(403, "no").getImmediateResponse().getStatus().getCode());
+        assertEquals(StatusCode.NotFound,
+                ResponseBuilder.immediateHttpError(404, "missing").getImmediateResponse().getStatus().getCode());
+        assertEquals(StatusCode.TooManyRequests,
+                ResponseBuilder.immediateHttpError(429, "slow").getImmediateResponse().getStatus().getCode());
+        assertEquals(StatusCode.BadGateway,
+                ResponseBuilder.immediateHttpError(502, "bad gateway").getImmediateResponse().getStatus().getCode());
         assertEquals(StatusCode.ServiceUnavailable,
                 ResponseBuilder.immediateHttpError(503, "down").getImmediateResponse().getStatus().getCode());
         // Unknown codes map to 500

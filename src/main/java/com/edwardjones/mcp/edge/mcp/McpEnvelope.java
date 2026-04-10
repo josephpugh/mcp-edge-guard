@@ -7,7 +7,7 @@ import org.slf4j.LoggerFactory;
 
 import static net.logstash.logback.argument.StructuredArguments.kv;
 
-public record McpEnvelope(String id, String method, String toolName, String policyText) {
+public record McpEnvelope(String id, String idJson, String method, String toolName, String policyText) {
 
     private static final Logger log = LoggerFactory.getLogger(McpEnvelope.class);
     private static final ObjectMapper MAPPER = new ObjectMapper();
@@ -17,15 +17,17 @@ public record McpEnvelope(String id, String method, String toolName, String poli
         JsonNode root = MAPPER.readTree(rawBody);
 
         boolean isBatch = root.isArray() && !root.isEmpty();
-        JsonNode msg = isBatch ? root.get(0) : root;
+        JsonNode msg = isBatch ? representativeBatchMessage(root) : root;
 
-        String id = msg.has("id") ? msg.get("id").asText("null") : "null";
+        JsonNode idNode = msg.get("id");
+        String id = idNode != null ? idNode.asText("null") : "null";
+        String idJson = idNode != null ? MAPPER.writeValueAsString(idNode) : "null";
         String method = msg.path("method").asText(null);
         String toolName = "tools/call".equals(method)
                 ? msg.path("params").path("name").asText(null)
                 : null;
 
-        String policyText = MAPPER.writeValueAsString(msg);
+        String policyText = MAPPER.writeValueAsString(isBatch ? root : msg);
         boolean truncated = policyText.length() > MAX_POLICY_TEXT_LENGTH;
         if (truncated) {
             policyText = policyText.substring(0, MAX_POLICY_TEXT_LENGTH);
@@ -38,6 +40,15 @@ public record McpEnvelope(String id, String method, String toolName, String poli
                 kv("isBatch", isBatch),
                 kv("policyTextTruncated", truncated));
 
-        return new McpEnvelope(id, method, toolName, policyText);
+        return new McpEnvelope(id, idJson, method, toolName, policyText);
+    }
+
+    private static JsonNode representativeBatchMessage(JsonNode batch) {
+        for (JsonNode msg : batch) {
+            if ("tools/call".equals(msg.path("method").asText(null))) {
+                return msg;
+            }
+        }
+        return batch.get(0);
     }
 }

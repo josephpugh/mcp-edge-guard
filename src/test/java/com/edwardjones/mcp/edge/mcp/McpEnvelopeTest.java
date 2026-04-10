@@ -23,6 +23,7 @@ class McpEnvelopeTest {
         McpEnvelope env = McpEnvelope.parse(json);
 
         assertEquals("42", env.id());
+        assertEquals("\"42\"", env.idJson());
         assertEquals("tools/call", env.method());
         assertEquals("get_weather", env.toolName());
         assertNotNull(env.policyText());
@@ -55,6 +56,12 @@ class McpEnvelopeTest {
                     "id": "10",
                     "method": "tools/call",
                     "params": {"name": "lookup_user"}
+                  },
+                  {
+                    "jsonrpc": "2.0",
+                    "id": "11",
+                    "method": "tools/call",
+                    "params": {"name": "delete_user"}
                   }
                 ]
                 """;
@@ -64,6 +71,35 @@ class McpEnvelopeTest {
         assertEquals("10", env.id());
         assertEquals("tools/call", env.method());
         assertEquals("lookup_user", env.toolName());
+        assertTrue(env.policyText().contains("lookup_user"));
+        assertTrue(env.policyText().contains("delete_user"));
+    }
+
+    @Test
+    void parseBatchArrayUsesFirstToolCallAsRepresentative() throws Exception {
+        String json = """
+                [
+                  {
+                    "jsonrpc": "2.0",
+                    "id": "10",
+                    "method": "resources/list"
+                  },
+                  {
+                    "jsonrpc": "2.0",
+                    "id": "11",
+                    "method": "tools/call",
+                    "params": {"name": "delete_user"}
+                  }
+                ]
+                """;
+
+        McpEnvelope env = McpEnvelope.parse(json);
+
+        assertEquals("11", env.id());
+        assertEquals("tools/call", env.method());
+        assertEquals("delete_user", env.toolName());
+        assertTrue(env.policyText().contains("resources/list"));
+        assertTrue(env.policyText().contains("delete_user"));
     }
 
     @Test
@@ -75,6 +111,7 @@ class McpEnvelopeTest {
         McpEnvelope env = McpEnvelope.parse(json);
 
         assertEquals("null", env.id());
+        assertEquals("null", env.idJson());
         assertEquals("notifications/initialized", env.method());
         assertNull(env.toolName());
     }
@@ -115,6 +152,7 @@ class McpEnvelopeTest {
         McpEnvelope env = McpEnvelope.parse(json);
 
         assertEquals("99", env.id());
+        assertEquals("99", env.idJson());
         assertEquals("tools/list", env.method());
     }
 
