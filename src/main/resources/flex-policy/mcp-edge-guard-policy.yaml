@@ -1,0 +1,58 @@
+# ---------------------------------------------------------------------------
+# Flex Gateway – External Processing policy binding for mcp-edge-guard
+#
+# Apply this PolicyBinding to each MCP API instance managed by Flex.
+# It should be ordered AFTER MCP Support, auth, and schema-validation
+# policies, and AFTER the tracing policy override (see ordering note below).
+#
+# Recommended API-level policy order:
+#   1. MCP Support
+#   2. Authentication / Authorization
+#   3. MCP Schema Validation
+#   4. Tracing (see mcp-tracing-policy.yaml)
+#   5. External Processing (this file)
+# ---------------------------------------------------------------------------
+apiVersion: gateway.mulesoft.com/v1alpha1
+kind: PolicyBinding
+metadata:
+  name: mcp-edge-guard-ext-proc
+spec:
+  targetRef:
+    kind: ApiInstance
+    name: mcp-api                       # replace with actual API instance name
+
+  policyRef:
+    name: external-processing
+
+  config:
+    # ── Endpoint ──────────────────────────────────────────────────────────
+    # h2:// = cleartext HTTP/2 (gRPC). Use h2s:// for mTLS in production.
+    uri: h2://mcp-edge-guard.guardrails.svc.cluster.local:9002
+
+    # ── Timeouts ──────────────────────────────────────────────────────────
+    messageTimeout: 2000                # per-message timeout (ms)
+    maxMessageTimeout: 5000             # absolute ceiling (ms)
+
+    # ── Failure & observability ───────────────────────────────────────────
+    # failureModeAllow=false: if the processor is unreachable, reject the
+    # request. This is the correct posture for a security control.
+    failureModeAllow: false
+
+    # observabilityMode=false: the processor can block/mutate traffic,
+    # not just observe it.
+    observabilityMode: false
+
+    # Allow the processor to override body processing modes per-message
+    # (e.g. switch from buffered to streamed for large SSE responses).
+    allowModeOverride: true
+
+    # ── Request processing ────────────────────────────────────────────────
+    requestHeaderMode: send             # send request headers to processor
+    requestBodyMode: buffered           # buffer full request body before sending
+
+    # ── Response processing ───────────────────────────────────────────────
+    responseHeaderMode: send            # send response headers to processor
+    responseBodyMode: buffered          # buffer full response body before sending
+    # For SSE / large-payload MCP servers, consider:
+    #   responseBodyMode: bufferedPartial
+    #   responseBodyMode: streamed

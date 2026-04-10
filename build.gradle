@@ -1,0 +1,61 @@
+plugins {
+    id 'java'
+    id 'org.springframework.boot' version '3.4.4'
+    id 'io.spring.dependency-management' version '1.1.7'
+}
+
+group = 'com.edwardjones.mcp.edge'
+version = '0.1.0-SNAPSHOT'
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(21)
+    }
+}
+
+repositories {
+    mavenCentral()
+}
+
+def grpcVersion = '1.69.0'
+def openTelemetryVersion = '1.46.0'
+
+dependencies {
+    // Spring Boot
+    implementation 'org.springframework.boot:spring-boot-starter'
+    implementation 'org.springframework.boot:spring-boot-starter-web'
+    implementation 'com.fasterxml.jackson.core:jackson-databind'
+
+    // JSON structured logging
+    implementation 'net.logstash.logback:logstash-logback-encoder:8.0'
+
+    // gRPC
+    implementation "net.devh:grpc-server-spring-boot-starter:3.1.0.RELEASE"
+    implementation "io.grpc:grpc-protobuf:${grpcVersion}"
+    implementation "io.grpc:grpc-stub:${grpcVersion}"
+
+    // Force consistent gRPC version across all transitive dependencies
+    implementation(platform("io.grpc:grpc-bom:${grpcVersion}"))
+
+    // Envoy ext-proc API (pre-built protobuf + gRPC stubs)
+    implementation "io.envoyproxy.controlplane:api:1.0.52"
+
+    // OpenTelemetry API (Dynatrace OneAgent provides the SDK at runtime in production)
+    implementation "io.opentelemetry:opentelemetry-api:${openTelemetryVersion}"
+    implementation "io.opentelemetry:opentelemetry-context:${openTelemetryVersion}"
+
+    // OpenTelemetry SDK for local development (registered only under 'local' profile)
+    implementation "io.opentelemetry:opentelemetry-sdk:${openTelemetryVersion}"
+    implementation "io.opentelemetry:opentelemetry-exporter-logging:${openTelemetryVersion}"
+
+    // Test
+    testImplementation 'org.springframework.boot:spring-boot-starter-test'
+    testImplementation "io.grpc:grpc-testing:${grpcVersion}"
+    testImplementation "io.grpc:grpc-inprocess:${grpcVersion}"
+    testImplementation "io.opentelemetry:opentelemetry-sdk-testing:${openTelemetryVersion}"
+    testImplementation "io.opentelemetry:opentelemetry-sdk:${openTelemetryVersion}"
+}
+
+tasks.named('test') {
+    useJUnitPlatform()
+}

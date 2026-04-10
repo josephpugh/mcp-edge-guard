@@ -1,0 +1,7 @@
+spring:
+  application:
+    name: mcp-edge-guard
+
+grpc:
+  server:
+    port: 9002

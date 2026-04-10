@@ -1,0 +1,44 @@
+# ---------------------------------------------------------------------------
+# Flex Gateway – API-level tracing policy override for MCP APIs
+#
+# Sets the gateway span name and attaches header-sourced labels that Flex
+# can resolve natively. Body-derived fields (mcp.method, mcp.tool.name)
+# and baggage-derived attributes live on the mcp.edge.guard span created
+# by the external processor instead — Flex tracing labels only support
+# literal, environment, and requestHeader sources.
+# ---------------------------------------------------------------------------
+apiVersion: gateway.mulesoft.com/v1alpha1
+kind: PolicyBinding
+metadata:
+  name: mcp-edge-tracing
+spec:
+  targetRef:
+    kind: ApiInstance
+    name: mcp-api                       # replace with actual API instance name
+
+  policyRef:
+    name: tracing
+
+  config:
+    spanName: mcp.edge
+
+    sampling:
+      client: 100
+      random: 100
+      overall: 100
+
+    labels:
+      - name: mcp.protocol.version
+        type: requestHeader
+        keyName: mcp-protocol-version
+        defaultValue: ""
+
+      - name: client.origin
+        type: requestHeader
+        keyName: origin
+        defaultValue: ""
+
+      - name: gateway.cluster
+        type: environment
+        keyName: CLUSTER_NAME
+        defaultValue: "unknown"
