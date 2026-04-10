@@ -344,6 +344,55 @@ class McpEdgeExternalProcessorTest {
     }
 
     @Test
+    void allowedBaggageIsCopiedToPolicySpan() throws Exception {
+        mockPangea = (recipe, text, toolName) -> {
+            var policySpan = tracer.spanBuilder("pangea.policy.evaluate").startSpan();
+            try {
+                com.edwardjones.mcp.edge.trace.TraceUtil.copyAllowedBaggageToSpan(
+                        policySpan, io.opentelemetry.context.Context.current());
+                return new GuardDecision(recipe, false, null);
+            } finally {
+                policySpan.end();
+            }
+        };
+
+        String serverName = InProcessServerBuilder.generateName();
+        grpcCleanup.register(InProcessServerBuilder.forName(serverName)
+                .directExecutor()
+                .addService(new McpEdgeExternalProcessor(mockPangea, tracer))
+                .build()
+                .start());
+        channel = grpcCleanup.register(
+                InProcessChannelBuilder.forName(serverName).directExecutor().build());
+        stub = ExternalProcessorGrpc.newStub(channel);
+
+        CollectingObserver observer = new CollectingObserver();
+        StreamObserver<ProcessingRequest> requestStream = stub.process(observer);
+
+        String body = """
+                {"jsonrpc":"2.0","id":"7","method":"tools/call","params":{"name":"search_docs"}}
+                """;
+
+        requestStream.onNext(requestHeaders(null, "tenant.id=acme,user.id=alice,secret.key=ignored"));
+        requestStream.onNext(requestBody(body));
+        requestStream.onCompleted();
+
+        observer.awaitCompletion();
+
+        SpanData policySpan = otelExtension.getSpans().stream()
+                .filter(s -> s.getName().equals("pangea.policy.evaluate"))
+                .findFirst()
+                .orElseThrow();
+
+        assertEquals("acme", policySpan.getAttributes().get(
+                io.opentelemetry.api.common.AttributeKey.stringKey("baggage.tenant.id")));
+        assertEquals("alice", policySpan.getAttributes().get(
+                io.opentelemetry.api.common.AttributeKey.stringKey("baggage.user.id")));
+        assertNull(policySpan.getAttributes().get(
+                io.opentelemetry.api.common.AttributeKey.stringKey("baggage.secret.key")));
+    }
+
+    @Test
     void mcpAttributesSetOnGuardSpan() throws Exception {
         CollectingObserver observer = new CollectingObserver();
         StreamObserver<ProcessingRequest> requestStream = stub.process(observer);

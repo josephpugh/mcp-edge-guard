@@ -137,7 +137,7 @@ public class McpEdgeExternalProcessor extends ExternalProcessorGrpc.ExternalProc
 
     private void handleRequestBody(ProcessingRequest request, SessionState session,
                                    StreamObserver<ProcessingResponse> out) {
-        try (Scope ignored = session.guardSpan.makeCurrent()) {
+        try (Scope ignored = session.guardContext.makeCurrent()) {
             String rawBody = request.getRequestBody().getBody().toStringUtf8();
 
             McpEnvelope envelope;
@@ -221,7 +221,7 @@ public class McpEdgeExternalProcessor extends ExternalProcessorGrpc.ExternalProc
 
     private void handleResponseBody(ProcessingRequest request, SessionState session,
                                     StreamObserver<ProcessingResponse> out) {
-        try (Scope ignored = session.guardSpan.makeCurrent()) {
+        try (Scope ignored = session.guardContext.makeCurrent()) {
             String rawBody = request.getResponseBody().getBody().toStringUtf8();
 
             log.info("Evaluating response policy: {} {} {} {}",

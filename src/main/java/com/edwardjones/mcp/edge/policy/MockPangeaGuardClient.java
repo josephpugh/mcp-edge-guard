@@ -1,8 +1,10 @@
 package com.edwardjones.mcp.edge.policy;
 
+import com.edwardjones.mcp.edge.trace.TraceUtil;
 import io.opentelemetry.api.GlobalOpenTelemetry;
 import io.opentelemetry.api.trace.Span;
 import io.opentelemetry.api.trace.Tracer;
+import io.opentelemetry.context.Context;
 import io.opentelemetry.context.Scope;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -36,6 +38,8 @@ public class MockPangeaGuardClient implements PangeaGuardClient {
     public GuardDecision guard(String recipe, String text, String toolName) {
         Span policySpan = tracer().spanBuilder("pangea.policy.evaluate")
                 .startSpan();
+
+        TraceUtil.copyAllowedBaggageToSpan(policySpan, Context.current());
 
         try (Scope ignored = policySpan.makeCurrent()) {
             policySpan.setAttribute("pangea.recipe", recipe);
